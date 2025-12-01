@@ -112,6 +112,7 @@ The server exposes the following tools (descriptively named for LLM clarity):
     - `execute_arbitrary_python_code`: **Power Tool** - Execute any PyQGIS script.
     - `run_python_unit_tests`: Run `unittest` suites and get structured JSON results.
     - `install_qgis_plugin_from_directory`: Deploy a plugin for testing.
+    - `reload_qgis_plugin`: Hot-reload a plugin during development.
     - `install_processing_script_from_file`: Deploy a Processing script.
     - `list_installed_processing_scripts`: List user scripts.
 

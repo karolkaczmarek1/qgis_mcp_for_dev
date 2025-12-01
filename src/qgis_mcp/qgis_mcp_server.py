@@ -350,7 +350,7 @@ def install_qgis_plugin_from_directory(ctx: Context, path: str) -> str:
     """
     Install a QGIS plugin from a local directory.
 
-    Copies the directory to the QGIS plugins folder and attempts to reload it.
+    Copies the directory to the QGIS plugins folder and attempts to reload/activate it.
     Useful for testing plugins during development.
 
     Args:
@@ -358,6 +358,21 @@ def install_qgis_plugin_from_directory(ctx: Context, path: str) -> str:
     """
     qgis = get_qgis_connection()
     result = qgis.send_command("install_plugin", {"path": path})
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+def reload_qgis_plugin(ctx: Context, plugin_name: str) -> str:
+    """
+    Reload or Activate a QGIS plugin by name.
+
+    If the plugin is already active, it reloads it (useful for development).
+    If it is not active, it attempts to load and start it.
+
+    Args:
+        plugin_name: The folder name of the plugin (e.g. 'my_plugin').
+    """
+    qgis = get_qgis_connection()
+    result = qgis.send_command("reload_plugin", {"name": plugin_name})
     return json.dumps(result, indent=2)
 
 @mcp.tool()

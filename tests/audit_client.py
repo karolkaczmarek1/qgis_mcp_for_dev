@@ -55,15 +55,10 @@ def run_audit():
     res = client.send_command("ping")
     print(f"Ping result: {res}")
 
-    print("\n--- 2. Install Processing Script ---")
-    # Using local path to the dummy script we created
-    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "dummy_algorithm.py"))
-    res = client.send_command("install_processing_script", {"path": script_path})
-    print(f"Install Script result: {json.dumps(res, indent=2)}")
-
-    print("\n--- 3. List Processing Scripts ---")
-    res = client.send_command("list_processing_scripts")
-    print(f"List Scripts result: {json.dumps(res, indent=2)}")
+    print("\n--- 2. Reload Plugin (Expect Failure) ---")
+    # Trying to reload a non-existent plugin
+    res = client.send_command("reload_plugin", {"name": "non_existent_plugin"})
+    print(f"Reload Plugin result: {json.dumps(res, indent=2)}")
 
     client.close()
 

@@ -11,7 +11,7 @@ from qgis.gui import *
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize
 from qgis.PyQt.QtWidgets import QAction, QDockWidget, QVBoxLayout, QLabel, QPushButton, QSpinBox, QWidget
 from qgis.PyQt.QtGui import QIcon, QColor
-from qgis.utils import active_plugins, reloadPlugin
+from qgis.utils import active_plugins, reloadPlugin, loadPlugin, startPlugin
 
 class QgisMCPServer(QObject):
     """Server class to handle socket connections and execute QGIS commands"""
@@ -152,6 +152,7 @@ class QgisMCPServer(QObject):
                 "create_new_project": self.create_new_project,
                 "run_test": self.run_test,
                 "install_plugin": self.install_plugin,
+                "reload_plugin": self.reload_plugin,
                 "install_processing_script": self.install_processing_script,
                 "list_processing_scripts": self.list_processing_scripts,
             }
@@ -371,6 +372,19 @@ class QgisMCPServer(QObject):
             sys.stdout = original_stdout
             sys.stderr = original_stderr
 
+    def reload_plugin(self, name, **kwargs):
+        """Reloads or Activates a plugin"""
+        try:
+            if name in active_plugins:
+                reloadPlugin(name)
+                return {"status": "reloaded", "plugin": name}
+            else:
+                loadPlugin(name)
+                startPlugin(name)
+                return {"status": "activated", "plugin": name}
+        except Exception as e:
+            return {"status": "error", "plugin": name, "message": str(e), "traceback": traceback.format_exc()}
+
     def install_plugin(self, path, **kwargs):
         """Install a plugin from a directory path"""
         if not os.path.isdir(path):
@@ -398,19 +412,8 @@ class QgisMCPServer(QObject):
         except Exception as e:
             raise Exception(f"Failed to copy plugin: {e}")
 
-        # Try to reload
-        # Note: In a headless environment without main loop, reloadPlugin might not work fully
-        # but it will update the python path/modules.
-        try:
-            if plugin_name in active_plugins:
-                reloadPlugin(plugin_name)
-                return {"status": "reloaded", "plugin": plugin_name}
-            else:
-                # If not active, we might want to activate it, but that usually requires GUI or QgsPluginRegistry
-                # which is not fully exposed here easily.
-                return {"status": "installed", "plugin": plugin_name, "message": "Restart QGIS to activate if not already active."}
-        except Exception as e:
-             return {"status": "installed_with_warning", "plugin": plugin_name, "warning": f"Could not reload: {e}"}
+        # Try to reload/activate
+        return self.reload_plugin(plugin_name)
 
     def install_processing_script(self, path, **kwargs):
         """Install a processing script from a file path"""
