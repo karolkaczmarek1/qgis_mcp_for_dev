@@ -4,12 +4,14 @@ import sys
 import json
 import socket
 import traceback
+import shutil
+import unittest
 from qgis.core import *
 from qgis.gui import *
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize
 from qgis.PyQt.QtWidgets import QAction, QDockWidget, QVBoxLayout, QLabel, QPushButton, QSpinBox, QWidget
 from qgis.PyQt.QtGui import QIcon, QColor
-from qgis.utils import active_plugins
+from qgis.utils import active_plugins, reloadPlugin
 
 class QgisMCPServer(QObject):
     """Server class to handle socket connections and execute QGIS commands"""
@@ -148,6 +150,10 @@ class QgisMCPServer(QObject):
                 "save_project": self.save_project,
                 "render_map": self.render_map,
                 "create_new_project": self.create_new_project,
+                "run_test": self.run_test,
+                "install_plugin": self.install_plugin,
+                "install_processing_script": self.install_processing_script,
+                "list_processing_scripts": self.list_processing_scripts,
             }
             
             handler = handlers.get(cmd_type)
@@ -275,6 +281,180 @@ class QgisMCPServer(QObject):
                 "stderr": stderr_capture.getvalue()
             }
     
+    def run_test(self, code=None, path=None, **kwargs):
+        """
+        Run tests using unittest.
+        Can provide either 'code' containing a test suite, or 'path' to a python test file.
+        """
+        if not code and not path:
+            raise Exception("Must provide either 'code' or 'path' for run_test")
+
+        # Capture stdout/stderr
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+
+        try:
+            sys.stdout = stdout_capture
+            sys.stderr = stderr_capture
+
+            loader = unittest.TestLoader()
+            suite = unittest.TestSuite()
+
+            if path:
+                if not os.path.exists(path):
+                    raise Exception(f"Test file not found: {path}")
+                # Load tests from file
+                directory = os.path.dirname(path)
+                filename = os.path.basename(path)
+                sys.path.insert(0, directory) # Add directory to path to allow imports
+                try:
+                    loaded_tests = loader.discover(start_dir=directory, pattern=filename)
+                    suite.addTests(loaded_tests)
+                finally:
+                    sys.path.remove(directory)
+
+            elif code:
+                # Load tests from code string
+                # Create a temporary module
+                import types
+                module_name = "temp_test_module"
+                module = types.ModuleType(module_name)
+                # Populate module with code
+                exec(code, module.__dict__)
+                # Load tests from module
+                loaded_tests = loader.loadTestsFromModule(module)
+                suite.addTests(loaded_tests)
+
+            # Run tests
+            runner = unittest.TextTestRunner(stream=stdout_capture, verbosity=2)
+            result = runner.run(suite)
+
+            # Construct structured result
+            failures = []
+            for case, msg in result.failures:
+                failures.append({
+                    "test": str(case),
+                    "message": msg,
+                    "type": "failure"
+                })
+            for case, msg in result.errors:
+                failures.append({
+                    "test": str(case),
+                    "message": msg,
+                    "type": "error"
+                })
+
+            return {
+                "executed": True,
+                "passed": result.testsRun - len(failures),
+                "failed": len(result.failures),
+                "errors": len(result.errors),
+                "total": result.testsRun,
+                "failures": failures,
+                "stdout": stdout_capture.getvalue(),
+                "stderr": stderr_capture.getvalue()
+            }
+
+        except Exception as e:
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            return {
+                "executed": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "stdout": stdout_capture.getvalue(),
+                "stderr": stderr_capture.getvalue()
+            }
+        finally:
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+
+    def install_plugin(self, path, **kwargs):
+        """Install a plugin from a directory path"""
+        if not os.path.isdir(path):
+            raise Exception(f"Plugin path is not a directory: {path}")
+
+        plugin_name = os.path.basename(path)
+        if not plugin_name: # Handle trailing slash
+            plugin_name = os.path.basename(os.path.dirname(path))
+
+        profile_dir = QgsApplication.qgisSettingsDirPath()
+        plugins_dir = os.path.join(profile_dir, "python", "plugins")
+
+        target_path = os.path.join(plugins_dir, plugin_name)
+
+        # Remove existing if present
+        if os.path.exists(target_path):
+            if os.path.islink(target_path):
+                os.unlink(target_path)
+            else:
+                shutil.rmtree(target_path)
+
+        # Copy new plugin
+        try:
+            shutil.copytree(path, target_path)
+        except Exception as e:
+            raise Exception(f"Failed to copy plugin: {e}")
+
+        # Try to reload
+        # Note: In a headless environment without main loop, reloadPlugin might not work fully
+        # but it will update the python path/modules.
+        try:
+            if plugin_name in active_plugins:
+                reloadPlugin(plugin_name)
+                return {"status": "reloaded", "plugin": plugin_name}
+            else:
+                # If not active, we might want to activate it, but that usually requires GUI or QgsPluginRegistry
+                # which is not fully exposed here easily.
+                return {"status": "installed", "plugin": plugin_name, "message": "Restart QGIS to activate if not already active."}
+        except Exception as e:
+             return {"status": "installed_with_warning", "plugin": plugin_name, "warning": f"Could not reload: {e}"}
+
+    def install_processing_script(self, path, **kwargs):
+        """Install a processing script from a file path"""
+        if not os.path.isfile(path):
+            raise Exception(f"Script path is not a file: {path}")
+
+        script_name = os.path.basename(path)
+        profile_dir = QgsApplication.qgisSettingsDirPath()
+        scripts_dir = os.path.join(profile_dir, "processing", "scripts")
+
+        if not os.path.exists(scripts_dir):
+            os.makedirs(scripts_dir)
+
+        target_path = os.path.join(scripts_dir, script_name)
+
+        try:
+            shutil.copy(path, target_path)
+        except Exception as e:
+            raise Exception(f"Failed to copy script: {e}")
+
+        # Refresh processing
+        try:
+            # We access the provider registry directly via QgsApplication
+            registry = QgsApplication.processingRegistry()
+            provider = registry.providerById("script")
+            if provider:
+                provider.refreshAlgorithms()
+                return {"status": "installed", "script": script_name, "message": "Script installed and provider refreshed"}
+            else:
+                 return {"status": "installed_no_provider", "script": script_name, "message": "Script copied but 'script' provider not found to refresh"}
+        except Exception as e:
+            return {"status": "installed_with_warning", "script": script_name, "warning": f"Could not refresh processing: {e}"}
+
+    def list_processing_scripts(self, **kwargs):
+        """List available processing scripts in the user scripts folder"""
+        profile_dir = QgsApplication.qgisSettingsDirPath()
+        scripts_dir = os.path.join(profile_dir, "processing", "scripts")
+
+        if not os.path.exists(scripts_dir):
+            return {"scripts": []}
+
+        scripts = [f for f in os.listdir(scripts_dir) if f.endswith(".py")]
+        return {"scripts": scripts}
+
     def add_vector_layer(self, path, name=None, provider="ogr", **kwargs):
         """Add a vector layer to the project"""
         if not name:
@@ -363,9 +543,12 @@ class QgisMCPServer(QObject):
         
         if layer_id in project.mapLayers():
             layer = project.mapLayer(layer_id)
-            self.iface.setActiveLayer(layer)
-            self.iface.zoomToActiveLayer()
-            return {"zoomed_to": layer_id}
+            if self.iface:
+                self.iface.setActiveLayer(layer)
+                self.iface.zoomToActiveLayer()
+                return {"zoomed_to": layer_id}
+            else:
+                return {"status": "warning", "message": "Headless mode: Zoom not performed", "layer_id": layer_id}
         else:
             raise Exception(f"Layer not found: {layer_id}")
     
@@ -442,7 +625,8 @@ class QgisMCPServer(QObject):
         project = QgsProject.instance()
         
         if project.read(path):
-            self.iface.mapCanvas().refresh()
+            if self.iface:
+                self.iface.mapCanvas().refresh()
             return {
                 "loaded": path,
                 "layer_count": len(project.mapLayers())
@@ -464,7 +648,8 @@ class QgisMCPServer(QObject):
             project.clear()
         
         project.setFileName(path)
-        self.iface.mapCanvas().refresh()
+        if self.iface:
+            self.iface.mapCanvas().refresh()
         
         # Save the project
         if project.write():
@@ -485,8 +670,26 @@ class QgisMCPServer(QObject):
             layers = list(QgsProject.instance().mapLayers().values())
             ms.setLayers(layers)
             
-            # Set map canvas properties
-            rect = self.iface.mapCanvas().extent()
+            # Set map canvas properties or fallback to project extent
+            rect = None
+            if self.iface:
+                rect = self.iface.mapCanvas().extent()
+            else:
+                # Calculate combined extent of all layers
+                rect = QgsRectangle()
+                rect.setMinimal()
+                first = True
+                for layer in layers:
+                    if first:
+                        rect = layer.extent()
+                        first = False
+                    else:
+                        rect.combineExtentWith(layer.extent())
+
+                # If still empty (no layers), set a default
+                if rect.isEmpty():
+                     rect = QgsRectangle(-180, -90, 180, 90)
+
             ms.setExtent(rect)
             ms.setOutputSize(QSize(width, height))
             ms.setBackgroundColor(QColor(255, 255, 255))
