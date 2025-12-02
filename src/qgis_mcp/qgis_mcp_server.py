@@ -27,7 +27,7 @@ class QgisMCPServer:
             self.socket.connect((self.host, self.port))
             return True
         except Exception as e:
-            print(f"Error connecting to server: {str(e)}")
+            logger.error(f"Error connecting to server: {str(e)}")
             return False
     
     def disconnect(self):
@@ -39,7 +39,7 @@ class QgisMCPServer:
     def send_command(self, command_type, params=None):
         """Send a command to the server and get the response"""
         if not self.socket:
-            print("Not connected to server")
+            logger.warning("Not connected to server")
             return None
         
         # Create command
@@ -71,7 +71,7 @@ class QgisMCPServer:
             return json.loads(response_data.decode('utf-8'))
             
         except Exception as e:
-            print(f"Error sending command: {str(e)}")
+            logger.error(f"Error sending command: {str(e)}")
             return None
 
 _qgis_connection = None
@@ -129,7 +129,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 
 mcp = FastMCP(
     "Qgis_mcp",
-    description="Qgis integration through the Model Context Protocol",
+    instructions="Qgis integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
 
