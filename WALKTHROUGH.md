@@ -10,10 +10,10 @@ This guide demonstrates how to leverage the QGIS MCP integration for various wor
 > "I have a shapefile at `/data/cities.shp`. Please load it into QGIS. Tell me how many cities are in the dataset. Then, create a 10km buffer around each city and save the result to `/data/city_buffers.shp`. Finally, export a map image of the result."
 
 **Agent Actions**:
-1.  `load_vector_layer(path="/data/cities.shp", name="Cities")`
+1.  `add_vector_layer(path="/data/cities.shp", name="Cities")`
 2.  `read_vector_layer_features(layer_id="...", limit=0)` -> Returns feature count.
 3.  `run_processing_algorithm(algorithm="native:buffer", parameters={"INPUT": "...", "DISTANCE": 10000, "OUTPUT": "/data/city_buffers.shp"})`
-4.  `load_vector_layer(path="/data/city_buffers.shp", name="Buffers")`
+4.  `add_vector_layer(path="/data/city_buffers.shp", name="Buffers")`
 5.  `export_map_view_to_image(path="/data/map_output.png")`
 
 ## Use Case 2: Automated Plugin Testing (Headless)

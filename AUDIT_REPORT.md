@@ -43,7 +43,7 @@ This audit evaluates the QGIS MCP Server's capability to serve as a test automat
 
 ### New Functionalities
 1.  **`reset_session`**: A tool to clear not just the project, but potentially reset other global QGIS settings or caches to ensure test isolation.
-2.  **`install_plugin` / `load_plugin`**: Tools to programmatically install and activate a plugin from a local path. This is essential if the agent is developing a plugin (folder) and wants to test it inside QGIS.
+2.  **`install_qgis_plugin_from_directory` / `reload_qgis_plugin`**: Tools to programmatically install and activate a plugin from a local path. This is essential if the agent is developing a plugin (folder) and wants to test it inside QGIS.
 
 ## Conclusion
 
