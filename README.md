@@ -1,17 +1,23 @@
 # QGISMCP - QGIS Model Context Protocol Integration
 
-QGISMCP connects [QGIS](https://qgis.org/) to [Claude AI](https://claude.ai/chat) (or any MCP client) through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/getting-started/intro), allowing AI agents to directly interact with and control QGIS. This integration enables prompt-assisted project creation, layer loading, code execution, and **automated software testing**.
+**This project is a significantly enhanced fork of the original [qgis_mcp](https://github.com/jjsantos01/qgis_mcp) by [jjsantos01](https://github.com/jjsantos01).**
 
-This project is strongly based on the [BlenderMCP](https://github.com/ahujasid/blender-mcp/tree/main) project by [Siddharth Ahuja](https://x.com/sidahuj)
+While based on the original concept, this version introduces advanced functionalities, performance improvements, and specialized tools tailored for **developers creating QGIS plugins and PyQGIS scripts**. It transforms QGIS into a fully controllable environment for AI agents, enabling sophisticated automation and rapid development workflows.
+
+QGISMCP connects [QGIS](https://qgis.org/) to [Claude AI](https://claude.ai/chat) (or any MCP client) through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/getting-started/intro).
+
+This project is also influenced by the [BlenderMCP](https://github.com/ahujasid/blender-mcp/tree/main) project by [Siddharth Ahuja](https://x.com/sidahuj).
 
 ## Features
 
 - **Two-way communication**: Connect AI agents to QGIS through a socket-based server.
 - **Project manipulation**: Create, open, and save projects.
 - **Layer manipulation**: Add/remove vector and raster layers, inspect features.
-- **Processing Framework**: Execute any QGIS Processing algorithm.
+- **Processing Framework**: Execute any QGIS Processing algorithm from the toolbox.
 - **Code Execution**: Run arbitrary PyQGIS code for unlimited flexibility.
-- **Test Automation**: specialized tools to run unit tests and deploy plugins/scripts in headless environments.
+- **Advanced Plugin Management**: Install, activate, and hot-reload QGIS plugins directly through AI prompts.
+- **Automated Testing & Deployment**: specialized tools to run unit tests and deploy processing scripts in headless or GUI environments.
+- **Persistent Settings**: Auto-start server functionality and remembered UI state.
 
 ## Components
 
@@ -44,7 +50,7 @@ Otherwise see: [Install uv](https://docs.astral.sh/uv/getting-started/installati
 ### Download code
 
 ```bash
-git clone git@github.com:jjsantos01/qgis_mcp.git
+git clone https://github.com/karolkaczmarek1/qgis_mcp_for_dev.git
 ```
 
 ### QGIS Plugin Setup
@@ -56,6 +62,7 @@ git clone git@github.com:jjsantos01/qgis_mcp.git
 2. Open QGIS.
 3. Go to `Plugins` > `Manage and Install Plugins`.
 4. Enable "QGIS MCP".
+5. **Optional**: Check "Start automatically" in the QGIS MCP dock widget to have the server start when QGIS opens.
 
 ### MCP Client Integration (Claude Desktop)
 
@@ -68,7 +75,7 @@ Go to `Claude` > `Settings` > `Developer` > `Edit Config` > `claude_desktop_conf
             "command": "uv",
             "args": [
                 "--directory",
-                "/ABSOLUTE/PATH/TO/REPO/qgis_mcp/src/qgis_mcp",
+                "/ABSOLUTE/PATH/TO/REPO/qgis_mcp_for_dev/src/qgis_mcp",
                 "run",
                 "qgis_mcp_server.py"
             ]
@@ -97,8 +104,8 @@ The server exposes the following tools (descriptively named for LLM clarity):
     - `get_current_project_metadata`: Inspect loaded layers/CRS.
 
 - **Layers**:
-    - `load_vector_layer`: Add vector data (shapefile, gpkg, etc).
-    - `load_raster_layer`: Add raster data (tif, etc).
+    - `add_vector_layer`: Add vector data (shapefile, gpkg, etc).
+    - `add_raster_layer`: Add raster data (tif, etc).
     - `list_project_layers`: List all layers.
     - `remove_layer_from_project`: Remove a layer.
     - `zoom_map_to_layer`: Zoom extent to layer.
