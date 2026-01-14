@@ -1,11 +1,11 @@
 [general]
 name=QGIS MCP
-description=Servidor socket para ejecutar comandos MCP en QGIS
-version=1.0
+description=Socket server to execute MCP commands in QGIS
+version=1.1
 qgisMinimumVersion=3.0
-author=TuNombre
+author=TuNombre, Karol Kaczmarek
 email=tu_correo@example.com
 category=Plugins
 
 [about]
-about=Este plugin inicia un servidor MCP en QGIS para permitir la ejecución de comandos desde un LLM.
+about=This plugin starts an MCP server in QGIS to allow command execution from an LLM.

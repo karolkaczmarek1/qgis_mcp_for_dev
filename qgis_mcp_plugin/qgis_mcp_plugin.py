@@ -8,8 +8,8 @@ import shutil
 import unittest
 from qgis.core import *
 from qgis.gui import *
-from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize
-from qgis.PyQt.QtWidgets import QAction, QDockWidget, QVBoxLayout, QLabel, QPushButton, QSpinBox, QWidget
+from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize, QSettings
+from qgis.PyQt.QtWidgets import QAction, QDockWidget, QVBoxLayout, QLabel, QPushButton, QSpinBox, QWidget, QCheckBox
 from qgis.PyQt.QtGui import QIcon, QColor
 from qgis.utils import active_plugins, reloadPlugin, loadPlugin, startPlugin
 
@@ -100,7 +100,8 @@ class QgisMCPServer(QObject):
                                 self.buffer = b''
                                 response = self.execute_command(command)
                                 response_json = json.dumps(response)
-                                self.client.sendall(response_json.encode('utf-8'))
+                                if self.client:
+                                    self.client.sendall(response_json.encode('utf-8'))
                             except json.JSONDecodeError:
                                 # Incomplete data, keep in buffer
                                 pass
@@ -756,12 +757,22 @@ class QgisMCPDockWidget(QDockWidget):
         self.stop_button.setEnabled(False)
         layout.addWidget(self.stop_button)
         
+        # Add auto-start checkbox
+        self.auto_start_check = QCheckBox("Start automatically")
+        self.auto_start_check.setChecked(QSettings().value("QGIS_MCP/auto_start", False, type=bool))
+        self.auto_start_check.stateChanged.connect(self.save_auto_start)
+        layout.addWidget(self.auto_start_check)
+
         # Add status label
         self.status_label = QLabel("Server: Stopped")
         layout.addWidget(self.status_label)
         
         # Add to dock widget
         self.setWidget(widget)
+
+    def save_auto_start(self, state):
+        """Save auto-start preference"""
+        QSettings().setValue("QGIS_MCP/auto_start", state == Qt.Checked)
     
     def start_server(self):
         """Start the server"""
@@ -814,6 +825,16 @@ class QgisMCPPlugin:
         # Add to plugins menu and toolbar
         self.iface.addPluginToMenu("QGIS MCP", self.action)
         self.iface.addToolBarIcon(self.action)
+
+        # Check auto-start
+        if QSettings().value("QGIS_MCP/auto_start", False, type=bool):
+            if not self.dock_widget:
+                self.dock_widget = QgisMCPDockWidget(self.iface)
+                self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock_widget)
+                self.dock_widget.closed.connect(self.dock_closed)
+            self.dock_widget.start_server()
+            self.dock_widget.show()
+            self.action.setChecked(True)
     
     def toggle_dock(self, checked):
         """Toggle the dock widget"""
