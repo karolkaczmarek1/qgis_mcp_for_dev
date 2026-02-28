@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 import socket
 import json
+import argparse
 from typing import AsyncIterator, Dict, Any
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -401,7 +402,36 @@ def list_installed_processing_scripts(ctx: Context) -> str:
 
 def main():
     """Run the MCP server"""
-    mcp.run()
+    parser = argparse.ArgumentParser(description="QGIS MCP Server")
+    parser.add_argument(
+        "--transport",
+        type=str,
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="Transport protocol to use: 'stdio' (default) or 'sse'."
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="localhost",
+        help="Host to bind to for SSE transport (default: localhost)."
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind to for SSE transport (default: 8000)."
+    )
+
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        # FastMCP sets host/port via settings on initialization.
+        # So if we want to change it, we need to modify mcp.settings before running
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+
+    mcp.run(transport=args.transport)
 
 if __name__ == "__main__":
     main()
