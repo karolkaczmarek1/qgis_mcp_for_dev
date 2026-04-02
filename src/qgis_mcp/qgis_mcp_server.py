@@ -7,11 +7,16 @@ import logging
 from contextlib import asynccontextmanager
 import socket
 import json
+import argparse
+import sys
 from typing import AsyncIterator, Dict, Any
 from mcp.server.fastmcp import FastMCP, Context
 
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stderr  # MUST be stderr for MCP compatibility
+)
 logger = logging.getLogger("QgisMCPServer")
 
 class QgisMCPServer:
@@ -27,7 +32,7 @@ class QgisMCPServer:
             self.socket.connect((self.host, self.port))
             return True
         except Exception as e:
-            print(f"Error connecting to server: {str(e)}")
+            logger.error(f"Error connecting to server: {str(e)}")
             return False
     
     def disconnect(self):
@@ -39,7 +44,7 @@ class QgisMCPServer:
     def send_command(self, command_type, params=None):
         """Send a command to the server and get the response"""
         if not self.socket:
-            print("Not connected to server")
+            logger.error("Not connected to server")
             return None
         
         # Create command
@@ -71,7 +76,7 @@ class QgisMCPServer:
             return json.loads(response_data.decode('utf-8'))
             
         except Exception as e:
-            print(f"Error sending command: {str(e)}")
+            logger.error(f"Error sending command: {str(e)}")
             return None
 
 _qgis_connection = None
@@ -401,7 +406,85 @@ def list_installed_processing_scripts(ctx: Context) -> str:
 
 def main():
     """Run the MCP server"""
-    mcp.run()
+    parser = argparse.ArgumentParser(description="QGIS MCP Server")
+    parser.add_argument(
+        "--transport",
+        type=str,
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="Transport protocol to use: 'stdio' (default) or 'sse'."
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="localhost",
+        help="Host to bind to for SSE transport (default: localhost)."
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind to for SSE transport (default: 8000)."
+    )
+
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        # Override the run_sse_async method to add CORS middleware to Starlette app
+        async def custom_run_sse_async():
+            import uvicorn
+            from starlette.applications import Starlette
+            from starlette.routing import Mount, Route
+            from starlette.middleware import Middleware
+            from starlette.middleware.cors import CORSMiddleware
+            from mcp.server.sse import SseServerTransport
+
+            # Using FastMCP's internal server setup
+            sse = SseServerTransport("/messages/")
+
+            async def handle_sse(request):
+                async with sse.connect_sse(
+                    request.scope, request.receive, request._send
+                ) as streams:
+                    await mcp._mcp_server.run(
+                        streams[0],
+                        streams[1],
+                        mcp._mcp_server.create_initialization_options(),
+                    )
+
+            # Add CORS middleware
+            middleware = [
+                Middleware(
+                    CORSMiddleware,
+                    allow_origins=["*"],
+                    allow_credentials=False,
+                    allow_methods=["*"],
+                    allow_headers=["*"],
+                )
+            ]
+
+            starlette_app = Starlette(
+                debug=False,
+                routes=[
+                    Route("/sse", endpoint=handle_sse),
+                    Mount("/messages/", app=sse.handle_post_message),
+                ],
+                middleware=middleware,
+            )
+
+            config = uvicorn.Config(
+                starlette_app,
+                host=args.host,
+                port=args.port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
+            await server.serve()
+
+        import anyio
+        anyio.run(custom_run_sse_async)
+    else:
+        mcp.run(transport=args.transport)
 
 if __name__ == "__main__":
     main()

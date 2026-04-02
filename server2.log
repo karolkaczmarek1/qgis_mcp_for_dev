@@ -1,0 +1,10 @@
+INFO:     Started server process [10379]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://localhost:8001 (Press CTRL+C to quit)
+2026-02-28 07:07:04,184 - QgisMCPServer - INFO - QgisMCPServer server starting up
+2026-02-28 07:07:04,188 - QgisMCPServer - ERROR - Error connecting to server: [Errno 111] Connection refused
+2026-02-28 07:07:04,188 - QgisMCPServer - ERROR - Failed to connect to Qgis
+2026-02-28 07:07:04,188 - QgisMCPServer - WARNING - Could not connect to Qgis on startup: Could not connect to Qgis. Make sure the Qgis plugin is running.
+2026-02-28 07:07:04,188 - QgisMCPServer - WARNING - Make sure the Qgis addon is running before using Qgis resources or tools
+INFO:     ::1:58776 - "GET /sse HTTP/1.1" 200 OK
