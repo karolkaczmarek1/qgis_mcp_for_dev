@@ -84,6 +84,20 @@ Go to `Claude` > `Settings` > `Developer` > `Edit Config` > `claude_desktop_conf
 }
 ```
 
+### Security & Timeouts (optional)
+
+The plugin listens on `localhost:9876` and can execute arbitrary Python code, so any local process can talk to it. To require a shared secret, set the same `QGIS_MCP_TOKEN` environment variable for **both** QGIS (e.g. a user environment variable, then restart QGIS) and the MCP server:
+
+```json
+"qgis": {
+    "command": "uv",
+    "args": ["--directory", "/ABSOLUTE/PATH/TO/REPO/qgis_mcp_for_dev/src/qgis_mcp", "run", "qgis_mcp_server.py"],
+    "env": { "QGIS_MCP_TOKEN": "some-long-random-string", "QGIS_MCP_TIMEOUT": "600" }
+}
+```
+
+`QGIS_MCP_TIMEOUT` (seconds, default `600`) limits how long the MCP server waits for QGIS to answer a command. Commands run on the QGIS GUI thread, so a long `execute_arbitrary_python_code` call still blocks QGIS until it finishes; the timeout only frees the agent.
+
 ## Usage
 
 ### Starting the Connection

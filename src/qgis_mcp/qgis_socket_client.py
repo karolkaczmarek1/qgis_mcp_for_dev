@@ -3,6 +3,7 @@
 QGIS MCP Client - Simple client to connect to the QGIS MCP server
 """
 
+import os
 import socket
 import json
 import argparse
@@ -41,7 +42,9 @@ class QgisMCPClient:
             "type": command_type,
             "params": params or {}
         }
-        
+        if os.environ.get("QGIS_MCP_TOKEN"):
+            command["token"] = os.environ["QGIS_MCP_TOKEN"]
+
         try:
             # Send the command
             self.socket.sendall(json.dumps(command).encode('utf-8'))
@@ -58,7 +61,7 @@ class QgisMCPClient:
                 try:
                     json.loads(response_data.decode('utf-8'))
                     break  # Valid JSON, we have the full message
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, UnicodeDecodeError):
                     continue  # Keep receiving
             
             # Parse and return the response

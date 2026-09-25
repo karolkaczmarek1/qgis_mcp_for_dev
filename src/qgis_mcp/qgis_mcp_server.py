@@ -4,13 +4,14 @@ QGIS MCP Client - Simple client to connect to the QGIS MCP server
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 import socket
 import json
 from typing import AsyncIterator, Dict, Any
 from mcp.server.fastmcp import FastMCP, Context
 
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("QgisMCPServer")
 
@@ -19,15 +20,19 @@ class QgisMCPServer:
         self.host = host
         self.port = port
         self.socket = None
-    
+        self.token = os.environ.get("QGIS_MCP_TOKEN")
+        self.timeout = float(os.environ.get("QGIS_MCP_TIMEOUT", "600"))
+
     def connect(self):
         """Connect to the QGIS MCP server"""
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(self.timeout)
             self.socket.connect((self.host, self.port))
             return True
         except Exception as e:
-            print(f"Error connecting to server: {str(e)}")
+            logger.error(f"Error connecting to server: {str(e)}")
+            self.socket = None
             return False
     
     def disconnect(self):
@@ -38,64 +43,65 @@ class QgisMCPServer:
     
     def send_command(self, command_type, params=None):
         """Send a command to the server and get the response"""
-        if not self.socket:
-            print("Not connected to server")
-            return None
-        
-        # Create command
         command = {
             "type": command_type,
             "params": params or {}
         }
-        
+        if self.token:
+            command["token"] = self.token
+
+        try:
+            return self._send_once(command)
+        except ConnectionError as e:
+            # Typically a stale socket left over from a restarted QGIS; the command never reached it.
+            logger.warning(f"Connection to QGIS lost ({e}), reconnecting and retrying once")
+            if not self.connect():
+                raise ConnectionError("Could not reconnect to QGIS. Make sure the QGIS plugin server is running.")
+            return self._send_once(command)
+
+    def _send_once(self, command):
+        if not self.socket:
+            raise ConnectionError("Not connected to QGIS")
+
         try:
             # Send the command
             self.socket.sendall(json.dumps(command).encode('utf-8'))
-            
+
             # Receive the response
             response_data = b''
             while True:
                 chunk = self.socket.recv(4096)
                 if not chunk:
-                    break
+                    raise ConnectionError("QGIS closed the connection before sending a complete response")
                 response_data += chunk
-                
+
                 # Try to decode as JSON to see if it's complete
                 try:
-                    json.loads(response_data.decode('utf-8'))
-                    break  # Valid JSON, we have the full message
-                except json.JSONDecodeError:
-                    continue  # Keep receiving
-            
-            # Parse and return the response
-            return json.loads(response_data.decode('utf-8'))
-            
-        except Exception as e:
-            print(f"Error sending command: {str(e)}")
-            return None
+                    return json.loads(response_data.decode('utf-8'))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue  # Keep receiving (incomplete JSON or split multi-byte character)
+        except socket.timeout:
+            # A late response would be read as the answer to the next command, so drop the connection.
+            self.disconnect()
+            raise TimeoutError(
+                f"QGIS did not respond within {self.timeout:.0f}s (QGIS_MCP_TIMEOUT). "
+                "The command may still be running inside QGIS."
+            )
+        except Exception:
+            self.disconnect()
+            raise
 
 _qgis_connection = None
 
 def get_qgis_connection():
     """Get or create a persistent Qgis connection"""
     global _qgis_connection
-    
-    # If we have an existing connection, check if it's still valid
-    if _qgis_connection is not None:
-        # Test if the connection is still alive with a simple ping
-        try:
-            # Just try to send a small message to check if the socket is still connected
-            _qgis_connection.sock.sendall(b'')
-            return _qgis_connection
-        except Exception as e:
-            # Connection is dead, close it and create a new one
-            logger.warning(f"Existing connection is no longer valid: {str(e)}")
-            try:
-                _qgis_connection.disconnect()
-            except Exception:
-                pass
-            _qgis_connection = None
-    
+
+    # send_command() disconnects on any socket error, so a missing socket means the connection is dead
+    if _qgis_connection is not None and _qgis_connection.socket is None:
+        logger.warning("Existing connection is no longer valid, reconnecting")
+        _qgis_connection = None
+
     # Create a new connection if needed
     if _qgis_connection is None:
         _qgis_connection = QgisMCPServer(host="localhost", port=9876)
@@ -129,7 +135,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
 
 mcp = FastMCP(
     "Qgis_mcp",
-    description="Qgis integration through the Model Context Protocol",
+    instructions="Qgis integration through the Model Context Protocol",
     lifespan=server_lifespan
 )
 

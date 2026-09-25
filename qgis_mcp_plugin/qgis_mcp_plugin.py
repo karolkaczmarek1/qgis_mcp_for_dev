@@ -2,6 +2,8 @@ import os
 import io
 import sys
 import json
+import hmac
+import importlib
 import socket
 import traceback
 import shutil
@@ -23,10 +25,11 @@ class QgisMCPServer(QObject):
         self.iface = iface
         self.running = False
         self.socket = None
-        self.client = None
-        self.buffer = b''
+        self.clients = {}  # client socket -> receive buffer
+        self._processing = False
         self.timer = None
-    
+        self.token = os.environ.get("QGIS_MCP_TOKEN")
+
     def start(self):
         """Start the server"""
         self.running = True
@@ -35,7 +38,7 @@ class QgisMCPServer(QObject):
         
         try:
             self.socket.bind((self.host, self.port))
-            self.socket.listen(1)
+            self.socket.listen(5)
             self.socket.setblocking(False)
             
             # Create a timer to process server operations
@@ -60,81 +63,101 @@ class QgisMCPServer(QObject):
             
         if self.socket:
             self.socket.close()
-        if self.client:
-            self.client.close()
-            
+        for client in list(self.clients):
+            client.close()
+
         self.socket = None
-        self.client = None
+        self.clients = {}
         QgsMessageLog.logMessage("QGIS MCP server stopped", "QGIS MCP")
-    
+
+    @staticmethod
+    def _ensure_parent_dir(path):
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+    def _drop_client(self, client):
+        self.clients.pop(client, None)
+        try:
+            client.close()
+        except OSError:
+            pass
+
     def process_server(self):
         """Process server operations (called by timer)"""
-        if not self.running:
+        # Some QGIS calls pump the Qt event loop, which would re-enter this handler mid-command.
+        if not self.running or self._processing:
             return
-            
+        self._processing = True
+
         try:
-            # Accept new connections
-            if not self.client and self.socket:
+            # Accept all pending connections; each MCP client (Claude Code, Antigravity, ...) keeps its own
+            while self.socket:
                 try:
-                    self.client, address = self.socket.accept()
-                    self.client.setblocking(False)
-                    QgsMessageLog.logMessage(f"Connected to client: {address}", "QGIS MCP")
+                    client, address = self.socket.accept()
                 except BlockingIOError:
-                    pass  # No connection waiting
+                    break  # No connection waiting
                 except Exception as e:
                     QgsMessageLog.logMessage(f"Error accepting connection: {str(e)}", "QGIS MCP", Qgis.Warning)
-                
-            # Process existing connection
-            if self.client:
-                try:
-                    # Try to receive data
-                    try:
-                        data = self.client.recv(8192)
-                        if data:
-                            self.buffer += data
-                            # Try to process complete messages
-                            try:
-                                # Attempt to parse the buffer as JSON
-                                command = json.loads(self.buffer.decode('utf-8'))
-                                # If successful, clear the buffer and process command
-                                self.buffer = b''
-                                response = self.execute_command(command)
-                                response_json = json.dumps(response)
-                                if self.client:
-                                    self.client.sendall(response_json.encode('utf-8'))
-                            except json.JSONDecodeError:
-                                # Incomplete data, keep in buffer
-                                pass
-                        else:
-                            # Connection closed by client
-                            QgsMessageLog.logMessage("Client disconnected", "QGIS MCP")
-                            self.client.close()
-                            self.client = None
-                            self.buffer = b''
-                    except BlockingIOError:
-                        pass  # No data available
-                    except Exception as e:
-                        QgsMessageLog.logMessage(f"Error receiving data: {str(e)}", "QGIS MCP", Qgis.Warning)
-                        self.client.close()
-                        self.client = None
-                        self.buffer = b''
-                        
-                except Exception as e:
-                    QgsMessageLog.logMessage(f"Error with client: {str(e)}", "QGIS MCP", Qgis.Warning)
-                    if self.client:
-                        self.client.close()
-                        self.client = None
-                    self.buffer = b''
-                    
+                    break
+                client.setblocking(False)
+                self.clients[client] = b''
+                QgsMessageLog.logMessage(f"Connected to client: {address} ({len(self.clients)} active)", "QGIS MCP")
+
+            for client in list(self.clients):
+                if client in self.clients:
+                    self._process_client(client)
+
         except Exception as e:
             QgsMessageLog.logMessage(f"Server error: {str(e)}", "QGIS MCP", Qgis.Critical)
+        finally:
+            self._processing = False
+
+    def _process_client(self, client):
+        try:
+            data = client.recv(8192)
+        except BlockingIOError:
+            return  # No data available
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error receiving data: {str(e)}", "QGIS MCP", Qgis.Warning)
+            self._drop_client(client)
+            return
+
+        if not data:
+            QgsMessageLog.logMessage("Client disconnected", "QGIS MCP")
+            self._drop_client(client)
+            return
+
+        buffer = self.clients[client] + data
+        try:
+            command = json.loads(buffer.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Incomplete data (or a split multi-byte character), keep in buffer
+            self.clients[client] = buffer
+            return
+        self.clients[client] = b''
+
+        response_json = json.dumps(self.execute_command(command))
+        try:
+            # sendall() on a non-blocking socket raises BlockingIOError once the
+            # send buffer fills, truncating large responses.
+            client.settimeout(30)
+            client.sendall(response_json.encode('utf-8'))
+            client.setblocking(False)
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Error sending response: {str(e)}", "QGIS MCP", Qgis.Warning)
+            self._drop_client(client)
 
     def execute_command(self, command):
         """Execute a command"""
         try:
+            if self.token and not hmac.compare_digest(str(command.get("token", "")), self.token):
+                QgsMessageLog.logMessage("Rejected command with missing or invalid token", "QGIS MCP", Qgis.Warning)
+                return {"status": "error", "message": "Unauthorized: missing or invalid QGIS_MCP_TOKEN"}
+
             cmd_type = command.get("type")
             params = command.get("params", {})
-            
+
             handlers = {
                 "ping": self.ping,
                 "get_qgis_info": self.get_qgis_info,
@@ -310,6 +333,10 @@ class QgisMCPServer(QObject):
                 # Load tests from file
                 directory = os.path.dirname(path)
                 filename = os.path.basename(path)
+                # QGIS keeps one interpreter alive, so a previously imported test module would be reused
+                # from sys.modules and edits to the file would be ignored.
+                sys.modules.pop(os.path.splitext(filename)[0], None)
+                importlib.invalidate_caches()
                 sys.path.insert(0, directory) # Add directory to path to allow imports
                 try:
                     loaded_tests = loader.discover(start_dir=directory, pattern=filename)
@@ -619,6 +646,7 @@ class QgisMCPServer(QObject):
             raise Exception("No project path specified and no current project path")
         
         save_path = path if path else project.fileName()
+        self._ensure_parent_dir(save_path)
         if project.write(save_path):
             return {"saved": save_path}
         else:
@@ -656,6 +684,7 @@ class QgisMCPServer(QObject):
             self.iface.mapCanvas().refresh()
         
         # Save the project
+        self._ensure_parent_dir(path)
         if project.write():
             return {
                 "created": f"Project created and saved successfully at: {path}",
@@ -708,6 +737,7 @@ class QgisMCPServer(QObject):
             
             # Get the image and save
             img = render.renderedImage()
+            self._ensure_parent_dir(path)
             if img.save(path):
                 return {
                     "rendered": True,
