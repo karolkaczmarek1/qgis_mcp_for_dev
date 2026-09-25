@@ -699,29 +699,35 @@ class QgisMCPServer(QObject):
             # Create map settings
             ms = QgsMapSettings()
             
-            # Set layers to render
-            layers = list(QgsProject.instance().mapLayers().values())
+            # Set layers to render, top-most first as in the layer tree
+            project = QgsProject.instance()
+            layers = [l for l in project.layerTreeRoot().checkedLayers() if l]
             ms.setLayers(layers)
-            
+
             # Set map canvas properties or fallback to project extent
             rect = None
             if self.iface:
+                canvas_settings = self.iface.mapCanvas().mapSettings()
+                ms.setDestinationCrs(canvas_settings.destinationCrs())
+                ms.setTransformContext(canvas_settings.transformContext())
                 rect = self.iface.mapCanvas().extent()
             else:
-                # Calculate combined extent of all layers
+                ms.setDestinationCrs(project.crs())
+                ms.setTransformContext(project.transformContext())
+                # Calculate combined extent of all layers in the project CRS
                 rect = QgsRectangle()
                 rect.setMinimal()
-                first = True
                 for layer in layers:
-                    if first:
-                        rect = layer.extent()
-                        first = False
-                    else:
-                        rect.combineExtentWith(layer.extent())
+                    try:
+                        layer_rect = ms.layerExtentToOutputExtent(layer, layer.extent())
+                    except Exception:
+                        continue
+                    rect.combineExtentWith(layer_rect)
 
                 # If still empty (no layers), set a default
                 if rect.isEmpty():
-                     rect = QgsRectangle(-180, -90, 180, 90)
+                    ms.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
+                    rect = QgsRectangle(-180, -90, 180, 90)
 
             ms.setExtent(rect)
             ms.setOutputSize(QSize(width, height))
