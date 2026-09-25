@@ -67,7 +67,7 @@ For automated testing without a display (e.g., Docker, GitHub Actions):
     ```
 
 3.  **Run the Server**:
-    Use a runner script (like `tests/audit_qgis_server.py`) that initializes `QgsApplication` with `GUIenabled=False` (or relies on `offscreen` platform) and starts `QgisMCPServer`.
+    Use a runner script (like `scripts/headless_qgis_server.py`) that initializes `QgsApplication` with `GUIenabled=False` (or relies on `offscreen` platform) and starts `QgisMCPServer`.
 
     ```python
     from qgis.core import QgsApplication

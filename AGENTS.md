@@ -14,8 +14,6 @@ Two processes talk over a local TCP socket:
 
 Wire protocol: one UTF-8 JSON object per request (`{"type", "params", "token"?}`) and per response (`{"status": "success"|"error", ...}`). There is no framing: a message is complete when the buffer parses as JSON. Keep it strictly request/response.
 
-`src/qgis_mcp/qgis_socket_client.py` is a standalone demo client and is not used by the MCP server.
-
 ## Adding or changing a tool
 
 1. Add a handler method to the plugin and register it in the `handlers` dict in `execute_command`.
@@ -51,8 +49,8 @@ Wire protocol: one UTF-8 JSON object per request (`{"type", "params", "token"?}`
 
 ## Testing
 
-There is no automated test suite. `tests/audit_qgis_server.py` and `tests/audit_client.py` are manual scripts.
+There is no automated test suite.
 
-- Headless QGIS: set `QT_QPA_PLATFORM=offscreen` and run with QGIS's Python. On Windows: `"C:\Program Files\QGIS <version>\bin\python-qgis-ltr.bat" tests\audit_qgis_server.py`.
+- Headless QGIS: `scripts/headless_qgis_server.py` starts the plugin server without the GUI. Set `QT_QPA_PLATFORM=offscreen` and run it with QGIS's Python. On Windows: `"C:\Program Files\QGIS <version>\bin\python-qgis-ltr.bat" scripts\headless_qgis_server.py`.
 - Only one process can listen on port 9876. Stop the plugin server in a running QGIS before starting a headless one.
 - After changing the protocol, test both a Claude Code and an Antigravity session against the same QGIS.

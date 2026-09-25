@@ -7,7 +7,7 @@ import json
 
 # Add qgis_mcp_plugin to path
 plugin_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'qgis_mcp_plugin'))
-sys.path.append(plugin_path)
+sys.path.insert(0, plugin_path)  # must win over the repo-root package of the same name
 
 # Mock qgis.gui if it fails to import (common in headless)
 # But we need qgis.core
