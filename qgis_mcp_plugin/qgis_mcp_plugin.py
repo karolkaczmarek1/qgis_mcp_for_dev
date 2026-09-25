@@ -10,10 +10,26 @@ import shutil
 import unittest
 from qgis.core import *
 from qgis.gui import *
-from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize, QSettings
+from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize, QSettings, QDate, QDateTime, QTime, QByteArray
 from qgis.PyQt.QtWidgets import QAction, QDockWidget, QVBoxLayout, QLabel, QPushButton, QSpinBox, QWidget, QCheckBox
 from qgis.PyQt.QtGui import QIcon, QColor
 from qgis.utils import active_plugins, reloadPlugin, loadPlugin, startPlugin
+
+
+def _json_default(obj):
+    """Convert Qt/QGIS values (dates, NULL variants, layers) that json.dumps cannot handle"""
+    if hasattr(obj, "isNull") and obj.isNull():
+        return None
+    if isinstance(obj, (QDate, QDateTime, QTime)):
+        return obj.toString(Qt.DateFormat.ISODate)
+    if isinstance(obj, QByteArray):
+        obj = bytes(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.hex()
+    if isinstance(obj, QgsMapLayer):
+        return {"id": obj.id(), "name": obj.name()}
+    return str(obj)
+
 
 class QgisMCPServer(QObject):
     """Server class to handle socket connections and execute QGIS commands"""
@@ -137,7 +153,12 @@ class QgisMCPServer(QObject):
             return
         self.clients[client] = b''
 
-        response_json = json.dumps(self.execute_command(command))
+        try:
+            response_json = json.dumps(self.execute_command(command), default=_json_default)
+        except Exception as e:
+            # Always answer, otherwise the client waits until its timeout
+            QgsMessageLog.logMessage(f"Error serializing response: {str(e)}", "QGIS MCP", Qgis.Critical)
+            response_json = json.dumps({"status": "error", "message": f"Could not serialize response: {str(e)}"})
         try:
             # sendall() on a non-blocking socket raises BlockingIOError once the
             # send buffer fills, truncating large responses.
@@ -583,16 +604,20 @@ class QgisMCPServer(QObject):
         else:
             raise Exception(f"Layer not found: {layer_id}")
     
-    def get_layer_features(self, layer_id, limit=10, **kwargs):
+    def get_layer_features(self, layer_id, limit=10, precision=None, **kwargs):
         """Get features from a vector layer"""
         project = QgsProject.instance()
-        
+
         if layer_id in project.mapLayers():
             layer = project.mapLayer(layer_id)
-            
+
             if layer.type() != QgsMapLayer.VectorLayer:
                 raise Exception(f"Layer is not a vector layer: {layer_id}")
-            
+
+            # ~1 mm in both degrees and metres
+            if precision is None:
+                precision = 8 if layer.crs().isGeographic() else 3
+
             features = []
             for i, feature in enumerate(layer.getFeatures()):
                 if i >= limit:
@@ -608,7 +633,7 @@ class QgisMCPServer(QObject):
                 if feature.hasGeometry():
                     geom = {
                         "type": feature.geometry().type(),
-                        "wkt": feature.geometry().asWkt(precision=4)
+                        "wkt": feature.geometry().asWkt(precision=precision)
                     }
                 
                 features.append({
@@ -631,9 +656,21 @@ class QgisMCPServer(QObject):
         try:
             import processing
             result = processing.run(algorithm, parameters)
+            outputs = {}
+            for key, value in result.items():
+                if isinstance(value, QgsMapLayer):
+                    # In-memory outputs are lost unless added to the project
+                    if not QgsProject.instance().mapLayer(value.id()):
+                        value.setName(f"{algorithm.split(':')[-1]}_{key.lower()}")
+                        QgsProject.instance().addMapLayer(value)
+                    outputs[key] = {"layer_id": value.id(), "name": value.name()}
+                elif isinstance(value, (str, int, float, bool)) or value is None:
+                    outputs[key] = value
+                else:
+                    outputs[key] = str(value)
             return {
                 "algorithm": algorithm,
-                "result": {k: str(v) for k, v in result.items()}  # Convert values to strings for JSON
+                "result": outputs
             }
         except Exception as e:
             raise Exception(f"Processing error: {str(e)}")
@@ -808,7 +845,7 @@ class QgisMCPDockWidget(QDockWidget):
 
     def save_auto_start(self, state):
         """Save auto-start preference"""
-        QSettings().setValue("QGIS_MCP/auto_start", state == Qt.Checked)
+        QSettings().setValue("QGIS_MCP/auto_start", self.auto_start_check.isChecked())
     
     def start_server(self):
         """Start the server"""
@@ -866,7 +903,7 @@ class QgisMCPPlugin:
         if QSettings().value("QGIS_MCP/auto_start", False, type=bool):
             if not self.dock_widget:
                 self.dock_widget = QgisMCPDockWidget(self.iface)
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock_widget)
+                self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_widget)
                 self.dock_widget.closed.connect(self.dock_closed)
             self.dock_widget.start_server()
             self.dock_widget.show()
@@ -878,7 +915,7 @@ class QgisMCPPlugin:
             # Create dock widget if it doesn't exist
             if not self.dock_widget:
                 self.dock_widget = QgisMCPDockWidget(self.iface)
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock_widget)
+                self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_widget)
                 # Connect close event
                 self.dock_widget.closed.connect(self.dock_closed)
             else:

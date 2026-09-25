@@ -263,22 +263,34 @@ def zoom_map_to_layer(ctx: Context, layer_id: str) -> str:
     return json.dumps(result, indent=2)
 
 @mcp.tool()
-def read_vector_layer_features(ctx: Context, layer_id: str, limit: int = 10) -> str:
+def read_vector_layer_features(ctx: Context, layer_id: str, limit: int = 10, precision: int = None) -> str:
     """
     Retrieve attributes and geometry for features in a vector layer.
+
+    Geometry is returned as WKT in the layer's CRS. Dates are returned as ISO 8601 strings
+    and NULL attributes as null.
 
     Args:
         layer_id: The unique ID of the layer.
         limit: Maximum number of features to return (default: 10).
+        precision: Decimal places in the WKT coordinates. Defaults to 8 for geographic CRSs
+            (degrees) and 3 for projected CRSs (metres), i.e. about 1 mm.
     """
     qgis = get_qgis_connection()
-    result = qgis.send_command("get_layer_features", {"layer_id": layer_id, "limit": limit})
+    params = {"layer_id": layer_id, "limit": limit}
+    if precision is not None:
+        params["precision"] = precision
+    result = qgis.send_command("get_layer_features", params)
     return json.dumps(result, indent=2)
 
 @mcp.tool()
 def run_processing_algorithm(ctx: Context, algorithm: str, parameters: dict) -> str:
     """
     Execute a QGIS Processing algorithm.
+
+    Layer parameters accept a project layer ID or a file path. Output layers created in
+    memory (e.g. OUTPUT set to 'TEMPORARY_OUTPUT') are added to the project and returned
+    as {"layer_id", "name"}; file outputs are returned as their path.
 
     Args:
         algorithm: The algorithm ID (e.g., 'native:buffer').
