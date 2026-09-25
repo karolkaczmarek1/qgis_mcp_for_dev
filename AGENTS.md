@@ -25,7 +25,7 @@ Wire protocol: one UTF-8 JSON object per request (`{"type", "params", "token"?}`
 ## Rules
 
 - **Never write to stdout in the MCP server.** stdout is the stdio JSON-RPC channel. Use `logger` (stderr).
-- Code must work with both the locked `mcp` version (`uv.lock`, 1.3.0) and current releases. Example: `FastMCP` takes `instructions=`, not `description=`.
+- `mcp` is pinned to `>=1.22.0,<2`. Older 1.x servers never finish the MCP handshake with Antigravity CLI, and 2.x renamed `FastMCP` to `MCPServer`. `FastMCP` takes `instructions=`, not `description=`.
 - Plugin handlers run inside the user's QGIS: avoid long blocking work and never let exceptions escape `process_server`.
 - `execute_arbitrary_python_code` runs arbitrary code with the user's permissions. The socket is unauthenticated unless `QGIS_MCP_TOKEN` is set for both QGIS and the MCP server.
 - File-writing handlers create missing parent directories via `_ensure_parent_dir`; do the same in new ones.
@@ -46,7 +46,7 @@ Wire protocol: one UTF-8 JSON object per request (`{"type", "params", "token"?}`
 ## Registering the MCP server
 
 - **Claude Code**: `.mcp.json` in the repo root registers the `qgis` server for this project.
-- **Antigravity CLI**: `agy mcp add qgis uv --directory <ABSOLUTE_REPO_PATH>/src/qgis_mcp run qgis_mcp_server.py` (stored in `~/.gemini/config/mcp_config.json`). Check with `agy mcp list`.
+- **Antigravity CLI**: `agy mcp add qgis -- uv --directory <ABSOLUTE_REPO_PATH>/src/qgis_mcp run qgis_mcp_server.py` (the `--` is required because the arguments start with `-`) (stored in `~/.gemini/config/mcp_config.json`). Check with `agy mcp list`.
 - **Claude Desktop**: see `README.md`.
 
 ## Testing
